@@ -1,11 +1,12 @@
 import tkinter as tk
 import random
 import sys
+import time
 
 from drone import Drone
 
 # Turn on for extra information. (See corresponding setting in drone.py as well.)
-DEBUG = False
+DEBUG = True
 
 # Turn off to stop showing the IDs on each drone. (Useful for very large boards.)
 SHOW_IDS = True
@@ -14,7 +15,7 @@ SHOW_IDS = True
 # replaced one per cycle starting a cycle after they are destroyed.
 # If ONE_SPAWN is True, all new drones start at (1, 1). Otherwise they start at
 # random locations on the board.
-DYNAMIC_MODE = True
+DYNAMIC_MODE = False
 DYN_TIME = 10
 DYN_NUM = 5
 ONE_SPAWN = False
@@ -25,7 +26,7 @@ EXACT_COVERAGE = True
 
 class Driver(tk.Canvas):
 
-    NUM_DRONES = 100
+    NUM_DRONES = 50
     TURN_TIME = 100
     X_DIM = 25
     Y_DIM = 25
@@ -45,6 +46,7 @@ class Driver(tk.Canvas):
 
     drones_made = 0
     time = 0
+    processing_time = 0
 
     def __init__(self, root):
         tk.Canvas.__init__(self, root, bg='#FFFFFF', bd=0, height=self.HEIGHT, width=self.WIDTH, highlightthickness=0)
@@ -128,6 +130,8 @@ class Driver(tk.Canvas):
             box_height = (self.HEIGHT / self.Y_DIM)
             x_box = p[0] // box_width
             y_box = p[1] // box_height
+            if x_box < 0 or x_box >= self.X_DIM or y_box < 0 or y_box >= self.Y_DIM:
+                continue
             x_center = (x_box) * box_width + 0.5 * box_width
             y_center = (y_box) * box_height + 0.5 * box_height
             # Add two to account for the border.
@@ -196,6 +200,9 @@ class Driver(tk.Canvas):
         self.graphics[drone] = (d_rect, d_text)
 
     def update(self):
+        # Time the method, so we can subtract our time processing from how long
+        # each step should take. It helps a little.
+        start = time.time()
         self.time += 1
 
         if DEBUG:
@@ -237,6 +244,9 @@ class Driver(tk.Canvas):
         for drone in list(self.drones):
             if self.drone_collision(drone):
                 self.destroy_drone(drone)
+        stop = time.time()
+        self.processing_time = stop - start
+        if DEBUG: print("Processing drones took {}s.".format(stop - start))
         self.draw()
 
     def make_and_destroy(self):
@@ -280,7 +290,6 @@ class Driver(tk.Canvas):
             return drone[0]
 
     def draw(self):
-        if DEBUG: print("Drawing!")
         for drone in self.graphics:
             drone_draw_pos = self.get_drone_draw_pos(drone)
             self.coords(self.graphics[drone][0], *drone_draw_pos[0])
@@ -288,7 +297,7 @@ class Driver(tk.Canvas):
             if drone.drone.t == 2:
                 self.itemconfig(self.graphics[drone][0], fill="red")
             self.coords(self.graphics[drone][1], *drone_draw_pos[1])
-        self.after(self.TURN_TIME, self.update)
+        self.after(max(0, int(self.TURN_TIME - self.processing_time)), self.update)
 
     def get_drone_draw_pos(self, drone):
         return self.get_rect_and_mid(drone.x, drone.y)

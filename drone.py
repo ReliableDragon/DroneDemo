@@ -1,5 +1,4 @@
 import random
-import ast
 import json
 
 DEBUG = False
@@ -71,9 +70,9 @@ class Drone():
                 messager = msg_callback(n)
                 last_seen = self.last_seen[n]
                 messager("MAP" + str(self.num) + "|" + str(self.coords)
-                         + "M" + str((self.x, self.y)) + "U"
-                         + str((last_seen[0], last_seen[1]))
-                         + str(self.map))
+                         + "M" + json.dumps([self.x, self.y]) + "U"
+                         + json.dumps([last_seen[0], last_seen[1]])
+                         + "D" + self.jsonify_dict())
                 self.syncs[n] = self.t
 
     def message_move(self, map, msg_callback):
@@ -82,7 +81,7 @@ class Drone():
         for n in nearby:
             if int(n) > int(self.num):
                 messager = msg_callback(n)
-                messager("MOVE" + str(self.num) + str(self.last_move))
+                messager("MOVE" + str(self.num) + json.dumps(list(self.last_move)))
 
     def move(self, map, msg_callback):
         target = self.get_target()
@@ -119,7 +118,7 @@ class Drone():
     def message_target(self, blocker, target, msg_callback):
         if DEBUG: print("Assigning target {} to drone {}".format(target, blocker))
         messager = msg_callback(blocker)
-        messager("TGT" + str(target))
+        messager("TGT" + json.dumps(list(target)))
         # If we were given the target, we can pick our own again now.
         if self.assigned_target:
             self.assigned_target = None
@@ -195,13 +194,13 @@ class Drone():
         return True
 
     def msg(self, msg):
-        # if DEBUG: print("Drone {} got message: {}".format(self.num, msg))
+        if DEBUG: print("Drone {} got message: {}".format(self.num, msg))
         if msg[:4] == "MOVE":
             msg = msg[4:]
-            dir_start = msg.find('(')
+            dir_start = msg.find('[')
             num = msg[:dir_start]
             dir = msg[dir_start:]
-            self.choreographed_moves[num] = ast.literal_eval(dir)
+            self.choreographed_moves[num] = tuple(json.loads(dir))
             # if DEBUG: print("Updated choreographs: {}".format(self.choreographed_moves))
         elif msg[:3] == "MAP":
             # Message format is (dicts in json)
@@ -210,22 +209,22 @@ class Drone():
             coord_start = msg.find('|')
             them_start = msg.find('M')
             us_start = msg.find('U')
-            map_start = msg.find('{')
+            map_start = msg.find('D')
             num = msg[:coord_start]
             # if DEBUG: print("Num: {}".format(num))
             coords = msg[coord_start+1:them_start]
             # if DEBUG: print("Coords: {}".format(coords))
-            them_loc = ast.literal_eval(msg[them_start+1:us_start])
+            them_loc = tuple(json.loads(msg[them_start+1:us_start]))
             # if DEBUG: print("Their loc: {}".format(them_loc))
-            us_loc = ast.literal_eval(msg[us_start+1:map_start])
+            us_loc = tuple(json.loads(msg[us_start+1:map_start]))
             # if DEBUG: print("Us loc: {}".format(us_loc))
-            unprocessed_map = ast.literal_eval(msg[map_start:])
+            unprocessed_map = self.pythonify_dict(msg[map_start+1:])
             self.combine_maps(unprocessed_map, num, coords, them_loc, us_loc)
             # if DEBUG: print("Updated map: {}".format(self.map))
             # if DEBUG: self.print_map()
         elif msg[:3] == "TGT":
             # Attempt to move towards target for 2 turns, due to ordering.
-            self.assigned_target = [ast.literal_eval(msg[3:]), 2]
+            self.assigned_target = [tuple(json.loads(msg[3:])), 2]
 
     # Requires a sensor map, not the memory map.
     # TODO: Fix this so that it works with memory map instead.
@@ -422,6 +421,20 @@ class Drone():
             self.relative_targets.append((adj_x, adj_y))
         if DEBUG: print("Projected target map. New relative map: {}"
             .format(self.relative_targets))
+
+    def jsonify_dict(self):
+        map = self.map
+        jlist = []
+        for k,v in map.items():
+            jlist.append([k[0], k[1], v[0], v[1]])
+        return json.dumps(jlist)
+
+    def pythonify_dict(self, _dict):
+        out_dict = {}
+        jlist = json.loads(_dict)
+        for i in jlist:
+            out_dict[(i[0], i[1])] = (i[2], i[3])
+        return out_dict
 
     def __hash__(self):
         return self.num
