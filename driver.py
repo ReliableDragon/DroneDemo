@@ -6,10 +6,10 @@ from drone import Drone
 
 class Driver(tk.Canvas):
 
-    NUM_DRONES = 2
-    TURN_TIME = 2000
-    X_DIM = 2
-    Y_DIM = 2
+    NUM_DRONES = 20
+    TURN_TIME = 100
+    X_DIM = 10
+    Y_DIM = 10
 
     HEIGHT = 600
     WIDTH = 600
@@ -202,6 +202,11 @@ class Driver(tk.Canvas):
                 if self.board[(drone.x, drone.y)] != str(drone.drone.num):
                     print("Drone {} crashed into drone {}!"
                         .format(drone.drone.num, d.drone.num))
+                    print("Absolute position: {}".format((drone.x, drone.y)))
+                    drone.drone.print_map()
+                    print("It had choreographs of {}"
+                        .format(drone.drone.choreographed_moves))
+
                     return True
 
         return False
