@@ -4,14 +4,15 @@ import sys
 
 from drone import Drone
 
-DEBUG = True
+DEBUG = False
+SHOW_IDS = True
 
 class Driver(tk.Canvas):
 
-    NUM_DRONES = 20
+    NUM_DRONES = 75
     TURN_TIME = 100
-    X_DIM = 10
-    Y_DIM = 10
+    X_DIM = 20
+    Y_DIM = 20
 
     HEIGHT = 600
     WIDTH = 600
@@ -21,11 +22,42 @@ class Driver(tk.Canvas):
     drones = []
     board = {(5, 0): "X"}
 
+    pattern_graphics = []
+    points = []
+    target_cells = []
+    cell_graphics = []
+
     drones_made = 0
 
     def __init__(self, root):
         tk.Canvas.__init__(self, root, bg='#FFFFFF', bd=0, height=self.HEIGHT, width=self.WIDTH, highlightthickness=0)
         self.pack()
+        self.bind("<B1-Motion>", self.drag)
+        self.bind("<Key>", self.enter)
+        self.focus_set()
+        self.display_message()
+        # self.start()
+
+    def display_message(self):
+        self.pattern_graphics.append(
+            self.create_text(
+                self.WIDTH/2,
+                self.HEIGHT/2,
+                text="Draw a pattern for the bots! (Then hit enter.)"))
+
+    def drag(self, event):
+        x = event.x
+        y = event.y
+        self.points.append((x, y))
+        point = self.create_oval(x-1, y-1, x+1, y+1, width=1, fill="black")
+        self.pattern_graphics.append(point)
+
+    def enter(self, event):
+        print("Starting bots!")
+        for i in self.pattern_graphics:
+            self.delete(i)
+        self.unbind("<B1-Motion>")
+        self.unbind("<Key>")
         self.start()
 
     def start(self):
@@ -54,6 +86,26 @@ class Driver(tk.Canvas):
                 y_loc,
                 self.WIDTH,
                 y_loc)
+        cell_graphics = []
+        # Append with two "buffer" cells for each wall, for the border.
+        self.target_cells.append((self.X_DIM + 4, self.Y_DIM + 4))
+        for p in self.points:
+            box_width = (self.WIDTH / self.X_DIM)
+            box_height = (self.HEIGHT / self.Y_DIM)
+            x_box = p[0] // box_width
+            y_box = p[1] // box_height
+            x_center = (x_box) * box_width + 0.5 * box_width
+            y_center = (y_box) * box_height + 0.5 * box_height
+            # Add two to account for the border.
+            if (int(x_box + 2), int(y_box + 2)) not in self.target_cells:
+                self.target_cells.append((int(x_box + 2), int(y_box + 2)))
+            self.cell_graphics.append(
+                self.create_rectangle(
+                    x_center - 0.5 * box_width,
+                    y_center - 0.5 * box_height,
+                    x_center + 0.5 * box_width,
+                    y_center + 0.5 * box_height,
+                    fill="#AAAAAA"))
 
     def build_drones(self):
         print("Building drones.")
@@ -63,7 +115,7 @@ class Driver(tk.Canvas):
                   (self.drone_collision(drone) or self.obstacle_crash(drone)))):
                 tries += 1
                 drone = AbsDrone(
-                    Drone(self.drones_made),
+                    Drone(self.drones_made, self.target_cells, self.NUM_DRONES),
                     random.randint(0, self.X_DIM-1),
                     random.randint(0, self.Y_DIM-1))
 
@@ -154,8 +206,8 @@ class Driver(tk.Canvas):
             return drone[0]
 
     def draw(self):
+        if DEBUG: print("Drawing!")
         for drone in self.graphics:
-
             drone_draw_pos = self.get_drone_draw_pos(drone)
             self.coords(self.graphics[drone][0], *drone_draw_pos[0])
             self.coords(self.graphics[drone][1], *drone_draw_pos[1])

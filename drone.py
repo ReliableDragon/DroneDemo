@@ -7,9 +7,19 @@ DEBUG = False
 class Drone():
 
     TIME_BETWEEN_SYNCS = 10
+    CONSENSUS_NEEDED = 0.25
 
-    def __init__(self, num):
+    def __init__(self, num, target_pattern, num_drones):
         self.num = num
+        # The first item here is (X_DIM, Y_DIM), so we can project it right.
+        self.target_pattern = target_pattern
+        if DEBUG: print("Target Pattern: {}".format(self.target_pattern))
+        # What, in our terms, are the squares we care about?
+        self.relative_targets = []
+        # This is only a rough estimate, used to adjust search/post behavior.
+        self.num_drones = num_drones
+        # TODO: Track max/min map values to avoid map scan each iteration.
+        self.relative_size = (0, 0)
         self.x = 0
         self.y = 0
         self.t = 0
@@ -17,19 +27,23 @@ class Drone():
         self.map = {(0, 0): ('M', 0)}
         # Unify coordinate systems as we go, in order to speed processing.
         self.coords = self.num
+        # When did we last sync with a given drone?
         self.syncs = {}
+        # Store where drones have said they are going next.
         self.choreographed_moves = {}
-        # TODO: Make use of this to avoid map scans.
+        # Where was the last known location of a given drone? Conditionally
+        # authoritative, which is a bad idea.
         self.last_seen = {}
 
     def update(self, unprocessed_map, msg_callback):
         if DEBUG: print("Drone {} running at location {}!".format(self.num, (self.x, self.y)))
-        if DEBUG: print("Choreographs: {}".format(self.choreographed_moves))
+        # if DEBUG: print("Choreographs: {}".format(self.choreographed_moves))
         if DEBUG: print("Raw map: {}".format(unprocessed_map))
         self.t += 1
         map = self.process_map(unprocessed_map, (self.x, self.y))
         self.update_map(map)
         if DEBUG: self.print_map()
+        self.project_map()
         # If we move before messaging the map, then it will show us in
         # a different location than their sensors will, which complicates
         # things.
@@ -62,10 +76,17 @@ class Drone():
                 messager("MOVE" + str(self.num) + str(self.last_move))
 
     def move(self, map):
-        options = [(1, 0), (0, 1), (-1, 0), (0, -1)]
-        random.shuffle(options)
-        while options:
-            dir = options.pop()
+        target = self.get_target()
+        moves = []
+        quorum = int(self.num_drones * self.CONSENSUS_NEEDED)
+        if not target or len(self.last_seen) < quorum:
+            moves = self.move_random(map)
+        else:
+            # moves = self.move_random(map)
+            moves = self.move_to_target(target, map)
+
+        while moves:
+            dir = moves.pop(0)
             if self.move_is_safe(dir, map):
                 self.map[(self.x, self.y)] = ('O', self.t)
                 self.x += dir[0]
@@ -78,6 +99,42 @@ class Drone():
             self.last_move = (0, 0)
         if DEBUG: print("Moved {}".format(self.last_move))
         return self.last_move
+
+    def move_random(self, map):
+        options = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+        random.shuffle(options)
+        return options
+
+    def move_to_target(self, target, map):
+        if self.x == target[0] and self.y == target[1]:
+            return [(0, 0)]
+        x_dist = target[0] - self.x
+        y_dist = target[1] - self.y
+        nearer = (1 if x_dist > 0 else -1, 0)
+        further = (0, 1 if y_dist > 0 else -1)
+        if abs(x_dist) > abs(y_dist):
+            nearer, further = further, nearer
+        moves = [further, nearer, (-further[0], -further[1]), (-nearer[0], -nearer[1])]
+        if DEBUG: print("Moves generated: {}".format(moves))
+        return moves
+
+    def get_target(self):
+        if DEBUG: print("Looking for target in {}".format(self.relative_targets))
+        valid = []
+        for f in self.relative_targets:
+            if f not in self.map:
+                continue
+            if self.map[f][0] == 'O' or self.map[f][0] == 'M':
+                valid.append(f)
+
+        if not valid:
+            if DEBUG: print("No target found.")
+            return None
+        else:
+            target = min(valid, key=lambda a: abs(a[0] - self.x) + abs(a[1] - self.y))
+            if DEBUG: print("Got target: {}".format(target))
+            return target
+
 
     # TODO: Use just memory map instead of needing the sensor map.
     def move_is_safe(self, dir, map):
@@ -97,14 +154,14 @@ class Drone():
         return True
 
     def msg(self, msg):
-        if DEBUG: print("Drone {} got message: {}".format(self.num, msg))
+        # if DEBUG: print("Drone {} got message: {}".format(self.num, msg))
         if msg[:4] == "MOVE":
             msg = msg[4:]
             dir_start = msg.find('(')
             num = msg[:dir_start]
             dir = msg[dir_start:]
             self.choreographed_moves[num] = ast.literal_eval(dir)
-            if DEBUG: print("Updated choreographs: {}".format(self.choreographed_moves))
+            # if DEBUG: print("Updated choreographs: {}".format(self.choreographed_moves))
         elif msg[:3] == "MAP":
             # Message format is (dicts in json)
             # MAP$THEIR_NUM|${COORDSYS}M${THEIR_LOC}U${OUR_LOC}{$DICT_DATA}
@@ -114,17 +171,17 @@ class Drone():
             us_start = msg.find('U')
             map_start = msg.find('{')
             num = msg[:coord_start]
-            if DEBUG: print("Num: {}".format(num))
+            # if DEBUG: print("Num: {}".format(num))
             coords = msg[coord_start+1:them_start]
-            if DEBUG: print("Coords: {}".format(coords))
+            # if DEBUG: print("Coords: {}".format(coords))
             them_loc = ast.literal_eval(msg[them_start+1:us_start])
-            if DEBUG: print("Their loc: {}".format(them_loc))
+            # if DEBUG: print("Their loc: {}".format(them_loc))
             us_loc = ast.literal_eval(msg[us_start+1:map_start])
-            if DEBUG: print("Us loc: {}".format(us_loc))
+            # if DEBUG: print("Us loc: {}".format(us_loc))
             unprocessed_map = ast.literal_eval(msg[map_start:])
             self.combine_maps(unprocessed_map, num, coords, them_loc, us_loc)
-            if DEBUG: print("Updated map: {}".format(self.map))
-            if DEBUG: self.print_map()
+            # if DEBUG: print("Updated map: {}".format(self.map))
+            # if DEBUG: self.print_map()
 
     # Requires a sensor map, not the memory map.
     # TODO: Fix this so that it works with memory map instead.
@@ -176,7 +233,7 @@ class Drone():
         # modified the copy. But this felt cleaner.
         for loc in n_locs:
             destination = self.update_cell(loc, _map, already_processed)
-            if DEBUG: print("Adding {} to skip list.".format(destination))
+            # if DEBUG: print("Adding {} to skip list.".format(destination))
             already_processed.append(destination)
         for dir in _map:
             self.update_cell(dir, _map, already_processed)
@@ -188,20 +245,20 @@ class Drone():
         # Some cells are processed out of order due to choreographs.
         # We need to skip them in order to avoid overwriting.
         if dir in already_processed:
-            if DEBUG: print("Skipping {}!".format(dir))
+            # if DEBUG: print("Skipping {}!".format(dir))
             return dir
 
         char = map[dir]
         # Update last seen for drones.
         if char != 'O' and char != 'X':
             self.last_seen[char] = (dir[0], dir[1])
-            if DEBUG: print("Updated last seen for {} to {}".format(char, dir))
+            # if DEBUG: print("Updated last seen for {} to {}".format(char, dir))
 
         # If they've choreographed a move, put their future location
         # into the map, rather than their old one, since they're
         # en route already. Also update last seen.
         if char in self.choreographed_moves:
-            if DEBUG: print("Updating {} for choreograph.".format(char))
+            # if DEBUG: print("Updating {} for choreograph.".format(char))
             choreograph = self.choreographed_moves[char]
             future_loc = (dir[0] + choreograph[0],
                           dir[1] + choreograph[1])
@@ -212,7 +269,7 @@ class Drone():
             self.last_seen[char] = future_loc
             self.map[future_loc] = (char, self.t)
             already_processed.append(future_loc)
-            if DEBUG: print("Set to location {}".format(future_loc))
+            # if DEBUG: print("Set to location {}".format(future_loc))
             return future_loc
         else:
             self.map[(dir[0], dir[1])] = (char, self.t)
@@ -228,22 +285,30 @@ class Drone():
         offset_y = self.y - my_pos[1]
 
         if num < str(self.num) and self.coords != coords:
-            if DEBUG: print("Renumbering to coordinate system {}".format(coords))
+            # if DEBUG: print("Renumbering to coordinate system {}".format(coords))
             self.renumber_map((offset_x, offset_y))
             self.coords = coords
 
         if self.coords != coords:
             map = self.process_map(map, (offset_x, offset_y))
 
-        if DEBUG: print(map)
+        # if DEBUG: print(map)
         for dir in map:
-            if (not dir in self.map) or map[dir][1] > self.map[dir][1]:
-                self.map[dir] = map[dir]
+            char = map[dir]
+            if (not dir in self.map) or char[1] > self.map[dir][1]:
+                self.map[dir] = char
+                # Also update last seen, so we have an idea of where everyone is.
+                if char[0] != 'O' and char[0] != 'X' and char[0] != 'M':
+                    if char[0] not in self.last_seen:
+                        self.last_seen[char[0]] = dir
+                    else:
+                        if self.map[self.last_seen[char[0]]][1] < char[1]:
+                            self.last_seen[char[0]] = dir
 
     def renumber_map(self, offset):
-        if DEBUG:
-            print("Before renumbering by offset {}.".format(offset))
-            self.print_map()
+        # if DEBUG:
+        #     print("Before renumbering by offset {}.".format(offset))
+        #     self.print_map()
         new_map = {}
         for k in list(self.map.keys()):
             new_x = k[0] - offset[0]
@@ -253,7 +318,19 @@ class Drone():
         self.map = new_map
         self.x -= offset[0]
         self.y -= offset[1]
-        if DEBUG: print("After renumbering: {}".format(self.map))
+        new_targets = []
+        for k in list(self.last_seen.keys()):
+            self.last_seen[k] = (self.last_seen[k][0] - offset[0],
+                                 self.last_seen[k][1] - offset[1])
+        for k in self.relative_targets:
+            new_x = k[0] - offset[0]
+            new_y = k[1] - offset[1]
+            new_targets.append((new_x, new_y))
+        del self.relative_targets
+        self.relative_targets = new_targets
+
+
+        # if DEBUG: print("After renumbering: {}".format(self.map))
 
     def make_abs_map(self):
         max_x = max([m[0] for m in self.map])
@@ -278,6 +355,31 @@ class Drone():
         for a in abs_map:
             s += ' '.join(a) + "\n"
         print(s)
+
+    def project_map(self):
+        abs_map = self.make_abs_map()
+        relative_size = (len(abs_map), len(abs_map[0]))
+        if relative_size == self.relative_size:
+            return
+
+        self.relative_targets = []
+        self.relative_size = relative_size
+        if DEBUG: print("Projecting target map: {}\n".format(self.target_pattern))
+        if DEBUG: print(abs_map)
+        me_y = ['M' in abs_map[i] for i in range(len(abs_map))].index(True)
+        me_x = abs_map[me_y].index('M')
+        max_x = self.target_pattern[0][0]
+        max_y = self.target_pattern[0][1]
+        for i in range(1, len(self.target_pattern)):
+            rel_x = self.target_pattern[i][0] / max_x
+            rel_y = self.target_pattern[i][1] / max_y
+            abs_x = int(rel_x * len(abs_map[0]))
+            abs_y = int(rel_y * len(abs_map))
+            adj_x = self.x - me_x + abs_x
+            adj_y = self.y - me_y + abs_y
+            self.relative_targets.append((adj_x, adj_y))
+        if DEBUG: print("Projected target map. New relative map: {}"
+            .format(self.relative_targets))
 
     def __hash__(self):
         return self.num
