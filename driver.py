@@ -4,6 +4,8 @@ import sys
 
 from drone import Drone
 
+DEBUG = True
+
 class Driver(tk.Canvas):
 
     NUM_DRONES = 20
@@ -17,7 +19,7 @@ class Driver(tk.Canvas):
     graphics = {}
     obstacle_graphics = {}
     drones = []
-    board = {(1, 3): "X", (4, 2): "X", (2, 4): "X", (9, 4): "X", (9, 8): "X"}
+    board = {(5, 0): "X"}
 
     drones_made = 0
 
@@ -89,6 +91,12 @@ class Driver(tk.Canvas):
             self.graphics[drone] = (d_rect, d_text)
 
     def update(self):
+        if DEBUG:
+            print("Drones size: {}".format(sys.getsizeof(self.drones)))
+            print("Drone sum size: {}".format(sum([sys.getsizeof(d) for d in self.drones])))
+            print("Graphics size: {}".format(sys.getsizeof(self.graphics)))
+            print("Obstacle Graphics size: {}".format(sys.getsizeof(self.obstacle_graphics)))
+            print("Board size: {}".format(sys.getsizeof(self.board)))
         new_board = self.board.copy()
         # Clear all drones from board, to avoid
         for k in list(new_board):
@@ -97,9 +105,9 @@ class Driver(tk.Canvas):
 
         # Use list() to allow modification during iteration, in case of crash.
         for drone in list(self.drones):
-            map = self.make_map(drone)
+            _map = self.make_map(drone)
 
-            move = drone.drone.update(map, self.send_message)
+            move = drone.drone.update(_map, self.send_message)
 
             drone.x += move[0]
             drone.y += move[1]

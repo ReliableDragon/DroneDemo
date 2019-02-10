@@ -1,7 +1,12 @@
 import random
 import ast
+import json
+
+DEBUG = False
 
 class Drone():
+
+    TIME_BETWEEN_SYNCS = 10
 
     def __init__(self, num):
         self.num = num
@@ -10,18 +15,21 @@ class Drone():
         self.t = 0
         self.last_move = (0, 0)
         self.map = {(0, 0): ('M', 0)}
+        # Unify coordinate systems as we go, in order to speed processing.
+        self.coords = self.num
         self.syncs = {}
         self.choreographed_moves = {}
         # TODO: Make use of this to avoid map scans.
         self.last_seen = {}
 
     def update(self, unprocessed_map, msg_callback):
-        # print("Drone {} running!".format(self.num))
-        # print("Choreographs: {}".format(self.choreographed_moves))
+        if DEBUG: print("Drone {} running at location {}!".format(self.num, (self.x, self.y)))
+        if DEBUG: print("Choreographs: {}".format(self.choreographed_moves))
+        if DEBUG: print("Raw map: {}".format(unprocessed_map))
         self.t += 1
         map = self.process_map(unprocessed_map, (self.x, self.y))
         self.update_map(map)
-        # self.print_map()
+        if DEBUG: self.print_map()
         # If we move before messaging the map, then it will show us in
         # a different location than their sensors will, which complicates
         # things.
@@ -36,8 +44,14 @@ class Drone():
         nearby = self.get_nearby(map)
         messages = []
         for n in nearby:
-            messager = msg_callback(n)
-            messager("MAP" + str(self.num) + str(self.map))
+            if n not in self.syncs or self.syncs[n] > self.t - self.TIME_BETWEEN_SYNCS:
+                messager = msg_callback(n)
+                last_seen = self.last_seen[n]
+                messager("MAP" + str(self.num) + "|" + str(self.coords)
+                         + "M" + str((self.x, self.y)) + "U"
+                         + str((last_seen[0], last_seen[1]))
+                         + str(self.map))
+                self.syncs[n] = self.t
 
     def message_move(self, map, msg_callback):
         nearby = self.get_nearby(map)
@@ -62,7 +76,7 @@ class Drone():
         # If we didn't break out of the loop, we can't move.
         else:
             self.last_move = (0, 0)
-        # print("Moved {}".format(self.last_move))
+        if DEBUG: print("Moved {}".format(self.last_move))
         return self.last_move
 
     # TODO: Use just memory map instead of needing the sensor map.
@@ -83,24 +97,34 @@ class Drone():
         return True
 
     def msg(self, msg):
-        # print("Drone {} got message: {}".format(self.num, msg))
+        if DEBUG: print("Drone {} got message: {}".format(self.num, msg))
         if msg[:4] == "MOVE":
             msg = msg[4:]
             dir_start = msg.find('(')
             num = msg[:dir_start]
             dir = msg[dir_start:]
             self.choreographed_moves[num] = ast.literal_eval(dir)
-            # print("Updated choreographs: {}".format(self.choreographed_moves))
+            if DEBUG: print("Updated choreographs: {}".format(self.choreographed_moves))
         elif msg[:3] == "MAP":
+            # Message format is (dicts in json)
+            # MAP$THEIR_NUM|${COORDSYS}M${THEIR_LOC}U${OUR_LOC}{$DICT_DATA}
             msg = msg[3:]
+            coord_start = msg.find('|')
+            them_start = msg.find('M')
+            us_start = msg.find('U')
             map_start = msg.find('{')
-            num = msg[:map_start]
-            # print("Num: {}".format(num))
-            unprocessed_map = msg[map_start:]
-            unprocessed_map = ast.literal_eval(unprocessed_map)
-            self.combine_maps(unprocessed_map, num)
-            # print("Updated map: {}".format(self.map))
-            # self.print_map()
+            num = msg[:coord_start]
+            if DEBUG: print("Num: {}".format(num))
+            coords = msg[coord_start+1:them_start]
+            if DEBUG: print("Coords: {}".format(coords))
+            them_loc = ast.literal_eval(msg[them_start+1:us_start])
+            if DEBUG: print("Their loc: {}".format(them_loc))
+            us_loc = ast.literal_eval(msg[us_start+1:map_start])
+            if DEBUG: print("Us loc: {}".format(us_loc))
+            unprocessed_map = ast.literal_eval(msg[map_start:])
+            self.combine_maps(unprocessed_map, num, coords, them_loc, us_loc)
+            if DEBUG: print("Updated map: {}".format(self.map))
+            if DEBUG: self.print_map()
 
     # Requires a sensor map, not the memory map.
     # TODO: Fix this so that it works with memory map instead.
@@ -123,59 +147,113 @@ class Drone():
         return new_map
 
     def find_object(self, map, id):
+        # Q_Q
+        # TODO: Stop using two types of maps all over.
+        for k, v in map.items():
+            if v == id:
+                return k
+
         for k, v in map.items():
             if v[0] == id:
                 return k
+
         raise RuntimeError("Could not find key {} in map {}".format(id, map))
 
-    def update_map(self, map):
+    def update_map(self, _map):
         already_processed = []
-        for dir in map:
-            # Some cells are processed out of order due to choreographs.
-            # We need to skip them in order to avoid overwriting.
-            if dir in already_processed:
-                continue
-            char = map[dir]
-            # Update last seen for drones.
-            if char != 'O' and char != 'X':
-                self.last_seen[char] = (dir[0], dir[1])
-                # print("Updated last seen for {} to {}".format(char, dir))
+        nearby = list(map(int, self.get_nearby(_map)))
+        nearby.sort()
+        n_locs = []
+        for n in nearby:
+            n_locs.append(self.find_object(_map, str(n)))
+        # We have to process all of the nearby drones in order, because
+        # lower numbered droned choose their moves first, which means
+        # higher numbered drones can plan to move into their
+        # soon-to-be-vacated spaces, which result in us overwriting the
+        # lower numbered drone's location in the map, and erroring out
+        # when we try to move it later. Going in order avoids this.
+        # We could also have copied the map, removed the drones, and
+        # modified the copy. But this felt cleaner.
+        for loc in n_locs:
+            destination = self.update_cell(loc, _map, already_processed)
+            if DEBUG: print("Adding {} to skip list.".format(destination))
+            already_processed.append(destination)
+        for dir in _map:
+            self.update_cell(dir, _map, already_processed)
 
-            # If they've choreographed a move, put their future location
-            # into the map, rather than their old one, since they're
-            # en route already. Also update last seen.
-            if char in self.choreographed_moves:
-                # print("Updating {} for choreograph.".format(char))
-                choreograph = self.choreographed_moves[char]
-                future_loc = (dir[0] + choreograph[0],
-                              dir[1] + choreograph[1])
-                if char in self.last_seen:
-                    # As far as we know, this square is empty now.
-                    self.map[self.last_seen[char]] = ('O', self.t)
-                    already_processed.append(self.last_seen[char])
-                self.last_seen[char] = future_loc
-                self.map[future_loc] = (char, self.t)
-                already_processed.append(future_loc)
-                # print("Set to location {}".format(future_loc))
-            else:
-                self.map[(dir[0], dir[1])] = (char, self.t)
+    # Returns the cell that it authoritatively wrote for. Most of the time
+    # this is the one it processed, but with choreographs it can be the
+    # one that the drone is choreographing into.
+    def update_cell(self, dir, map, already_processed):
+        # Some cells are processed out of order due to choreographs.
+        # We need to skip them in order to avoid overwriting.
+        if dir in already_processed:
+            if DEBUG: print("Skipping {}!".format(dir))
+            return dir
 
-    def combine_maps(self, unprocessed_map, num):
-        my_pos_to_them = self.find_object(unprocessed_map, str(self.num))
-        their_pos = self.find_object(unprocessed_map, 'M')
+        char = map[dir]
+        # Update last seen for drones.
+        if char != 'O' and char != 'X':
+            self.last_seen[char] = (dir[0], dir[1])
+            if DEBUG: print("Updated last seen for {} to {}".format(char, dir))
+
+        # If they've choreographed a move, put their future location
+        # into the map, rather than their old one, since they're
+        # en route already. Also update last seen.
+        if char in self.choreographed_moves:
+            if DEBUG: print("Updating {} for choreograph.".format(char))
+            choreograph = self.choreographed_moves[char]
+            future_loc = (dir[0] + choreograph[0],
+                          dir[1] + choreograph[1])
+            if char in self.last_seen:
+                # As far as we know, this square is empty now.
+                self.map[self.last_seen[char]] = ('O', self.t)
+                already_processed.append(self.last_seen[char])
+            self.last_seen[char] = future_loc
+            self.map[future_loc] = (char, self.t)
+            already_processed.append(future_loc)
+            if DEBUG: print("Set to location {}".format(future_loc))
+            return future_loc
+        else:
+            self.map[(dir[0], dir[1])] = (char, self.t)
+            return (dir[0], dir[1])
+
+    def combine_maps(self, map, num, coords, their_pos, my_pos):
         # Update their location to have their ID, instead of 'M'.
-        unprocessed_map[their_pos] = [str(num), unprocessed_map[their_pos][1]]
+        map[their_pos] = (str(num), map[their_pos][1])
         # Update our position to have 'M' instead of our ID.
-        unprocessed_map[my_pos_to_them] = ['M', unprocessed_map[my_pos_to_them][1]]
+        map[my_pos] = ('M', map[my_pos][1])
 
-        offset_x = self.x - my_pos_to_them[0]
-        offset_y = self.y - my_pos_to_them[1]
+        offset_x = self.x - my_pos[0]
+        offset_y = self.y - my_pos[1]
 
-        map = self.process_map(unprocessed_map, (offset_x, offset_y))
-        # print(map)
+        if num < str(self.num) and self.coords != coords:
+            if DEBUG: print("Renumbering to coordinate system {}".format(coords))
+            self.renumber_map((offset_x, offset_y))
+            self.coords = coords
+
+        if self.coords != coords:
+            map = self.process_map(map, (offset_x, offset_y))
+
+        if DEBUG: print(map)
         for dir in map:
             if (not dir in self.map) or map[dir][1] > self.map[dir][1]:
                 self.map[dir] = map[dir]
+
+    def renumber_map(self, offset):
+        if DEBUG:
+            print("Before renumbering by offset {}.".format(offset))
+            self.print_map()
+        new_map = {}
+        for k in list(self.map.keys()):
+            new_x = k[0] - offset[0]
+            new_y = k[1] - offset[1]
+            new_map[(new_x, new_y)] = self.map[k]
+        del self.map
+        self.map = new_map
+        self.x -= offset[0]
+        self.y -= offset[1]
+        if DEBUG: print("After renumbering: {}".format(self.map))
 
     def make_abs_map(self):
         max_x = max([m[0] for m in self.map])
@@ -190,7 +268,7 @@ class Drone():
             y_abs = y_rel - min_y
             y_tot = max_y - min_y
             x_tot = max_x - min_x
-            empty_map[y_tot - y_abs][x_abs] = v[0]
+            empty_map[y_abs][x_abs] = v[0]
 
         return empty_map
 
@@ -198,7 +276,7 @@ class Drone():
         abs_map = self.make_abs_map()
         s = ""
         for a in abs_map:
-            s += ''.join(a) + "\n"
+            s += ' '.join(a) + "\n"
         print(s)
 
     def __hash__(self):
