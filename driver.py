@@ -6,13 +6,16 @@ from drone import Drone
 
 DEBUG = False
 SHOW_IDS = True
+DYNAMIC_MODE = False
+EXACT_COVERAGE = True
+DYN_TIME = 1
 
 class Driver(tk.Canvas):
 
-    NUM_DRONES = 75
-    TURN_TIME = 100
-    X_DIM = 20
-    Y_DIM = 20
+    NUM_DRONES = 50
+    TURN_TIME = 250
+    X_DIM = 10
+    Y_DIM = 10
 
     HEIGHT = 600
     WIDTH = 600
@@ -28,6 +31,7 @@ class Driver(tk.Canvas):
     cell_graphics = []
 
     drones_made = 0
+    time = 0
 
     def __init__(self, root):
         tk.Canvas.__init__(self, root, bg='#FFFFFF', bd=0, height=self.HEIGHT, width=self.WIDTH, highlightthickness=0)
@@ -109,19 +113,31 @@ class Driver(tk.Canvas):
 
     def build_drones(self):
         print("Building drones.")
-        for i in range(self.NUM_DRONES):
-            tries = 0
-            while (tries == 0 or (tries < 10 and
-                  (self.drone_collision(drone) or self.obstacle_crash(drone)))):
-                tries += 1
-                drone = AbsDrone(
-                    Drone(self.drones_made, self.target_cells, self.NUM_DRONES),
-                    random.randint(0, self.X_DIM-1),
-                    random.randint(0, self.Y_DIM-1))
+        for i in range(self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)):
+            self.make_drone()
 
-            self.board[(drone.x, drone.y)] = str(drone.drone.num)
-            self.drones.append(drone)
-            self.drones_made += 1
+    def make_drone(self, x=None, y=None):
+        tries = 0
+        while (tries == 0 or (tries < 10 and
+              (self.drone_collision(drone) or self.obstacle_crash(drone)))):
+            tries += 1
+            drone = AbsDrone(
+                Drone(
+                    self.drones_made,
+                    self.target_cells,
+                    self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)),
+                x if x else random.randint(0, self.X_DIM-1),
+                y if y else random.randint(0, self.Y_DIM-1))
+            if x and y:
+                x += 1 if random.randint(0, 1) else -1
+                y += 1 if random.randint(0, 1) else -1
+        if tries == 10:
+            print("Unable to create drone {}!".format(self.drones_made))
+
+        self.board[(drone.x, drone.y)] = str(drone.drone.num)
+        self.drones.append(drone)
+        self.drones_made += 1
+        return drone
 
     def create_graphics(self):
         print("Drones built. Creating visualizations.")
@@ -132,28 +148,42 @@ class Driver(tk.Canvas):
                     *self.get_rect_and_mid(*obstacle)[0], fill="#4444ff")
 
         for drone in self.drones:
-            drone_draw_pos = self.get_drone_draw_pos(drone)
-            d_rect = self.create_rectangle(
-                *drone_draw_pos[0],
-                fill = 'red')
-            d_text = self.create_text(
-                *drone_draw_pos[1],
-                text=str(drone.drone.num),
-                font=('arial', 28))
-            self.graphics[drone] = (d_rect, d_text)
+            self.draw_drone_graphic(drone)
+
+    def draw_drone_graphic(self, drone):
+        drone_draw_pos = self.get_drone_draw_pos(drone)
+        d_rect = self.create_rectangle(
+            *drone_draw_pos[0],
+            fill = 'red')
+        d_text = self.create_text(
+            *drone_draw_pos[1],
+            text=str(drone.drone.num),
+            font=('arial', 28))
+        self.graphics[drone] = (d_rect, d_text)
 
     def update(self):
+        self.time += 1
+
         if DEBUG:
             print("Drones size: {}".format(sys.getsizeof(self.drones)))
             print("Drone sum size: {}".format(sum([sys.getsizeof(d) for d in self.drones])))
             print("Graphics size: {}".format(sys.getsizeof(self.graphics)))
             print("Obstacle Graphics size: {}".format(sys.getsizeof(self.obstacle_graphics)))
             print("Board size: {}".format(sys.getsizeof(self.board)))
+
         new_board = self.board.copy()
         # Clear all drones from board, to avoid
         for k in list(new_board):
             if new_board[k] != "X":
                 del new_board[k]
+
+
+        if DYNAMIC_MODE:
+            if self.time % DYN_TIME == 0:
+                drone = random.choice(self.drones)
+                self.destroy_drone(drone)
+                drone = self.make_drone(1, 1)
+                self.draw_drone_graphic(drone)
 
         # Use list() to allow modification during iteration, in case of crash.
         for drone in list(self.drones):
@@ -175,7 +205,6 @@ class Driver(tk.Canvas):
         for drone in list(self.drones):
             if self.drone_collision(drone):
                 self.destroy_drone(drone)
-
         self.draw()
 
     def send_message(self, to):

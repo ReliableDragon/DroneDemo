@@ -34,6 +34,7 @@ class Drone():
         # Where was the last known location of a given drone? Conditionally
         # authoritative, which is a bad idea.
         self.last_seen = {}
+        self.assigned_target = None
 
     def update(self, unprocessed_map, msg_callback):
         if DEBUG: print("Drone {} running at location {}!".format(self.num, (self.x, self.y)))
@@ -49,7 +50,7 @@ class Drone():
         # things.
         self.message_map(map, msg_callback)
         # Move, so we can send our choreograph signal.
-        move = self.move(map)
+        move = self.move(map, msg_callback)
         self.message_move(map, msg_callback)
         self.choreographed_moves = {}
         return move
@@ -75,7 +76,7 @@ class Drone():
                 messager = msg_callback(n)
                 messager("MOVE" + str(self.num) + str(self.last_move))
 
-    def move(self, map):
+    def move(self, map, msg_callback):
         target = self.get_target()
         moves = []
         quorum = int(self.num_drones * self.CONSENSUS_NEEDED)
@@ -84,6 +85,12 @@ class Drone():
         else:
             # moves = self.move_random(map)
             moves = self.move_to_target(target, map)
+
+        # If we're blocked by another drone, give them our target.
+        best_dir = moves[0]
+        blocker = self.drone_at(best_dir, map)
+        if blocker:
+            self.message_target(blocker, target, msg_callback)
 
         while moves:
             dir = moves.pop(0)
@@ -99,6 +106,20 @@ class Drone():
             self.last_move = (0, 0)
         if DEBUG: print("Moved {}".format(self.last_move))
         return self.last_move
+
+    def message_target(self, blocker, target, msg_callback):
+        if DEBUG: print("Assigning target {} to drone {}".format(target, blocker))
+        messager = msg_callback(blocker)
+        messager("TGT" + str(target))
+
+    def drone_at(self, move, map):
+        move_space = (self.x + move[0], self.y + move[1])
+        if DEBUG: print("Looking from drone at {}".format(move_space))
+        in_space = self.map.get(move_space)[0]
+        if in_space != 'X' and in_space != 'O' and in_space != 'M':
+            return in_space
+        else:
+            return None
 
     def move_random(self, map):
         options = [(1, 0), (0, 1), (-1, 0), (0, -1)]
@@ -119,6 +140,13 @@ class Drone():
         return moves
 
     def get_target(self):
+        # If we're blocking another drone, move out of the way.
+        if self.assigned_target:
+            if DEBUG: print("Assigned target: {}".format(self.assigned_target))
+            tgt = self.assigned_target
+            self.assigned_target = None
+            return tgt
+
         if DEBUG: print("Looking for target in {}".format(self.relative_targets))
         valid = []
         for f in self.relative_targets:
@@ -134,7 +162,6 @@ class Drone():
             target = min(valid, key=lambda a: abs(a[0] - self.x) + abs(a[1] - self.y))
             if DEBUG: print("Got target: {}".format(target))
             return target
-
 
     # TODO: Use just memory map instead of needing the sensor map.
     def move_is_safe(self, dir, map):
@@ -182,6 +209,8 @@ class Drone():
             self.combine_maps(unprocessed_map, num, coords, them_loc, us_loc)
             # if DEBUG: print("Updated map: {}".format(self.map))
             # if DEBUG: self.print_map()
+        elif msg[:3] == "TGT":
+            self.assigned_target = ast.literal_eval(msg[3:])
 
     # Requires a sensor map, not the memory map.
     # TODO: Fix this so that it works with memory map instead.
@@ -328,8 +357,6 @@ class Drone():
             new_targets.append((new_x, new_y))
         del self.relative_targets
         self.relative_targets = new_targets
-
-
         # if DEBUG: print("After renumbering: {}".format(self.map))
 
     def make_abs_map(self):
