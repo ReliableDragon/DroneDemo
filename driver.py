@@ -23,7 +23,7 @@ class Driver(tk.Canvas):
     graphics = {}
     obstacle_graphics = {}
     drones = []
-    board = {(5, 0): "X"}
+    board = {(5, 0): "X", (0, 5): "X", (5, 5): "X"}
 
     pattern_graphics = []
     points = []
@@ -54,7 +54,7 @@ class Driver(tk.Canvas):
         y = event.y
         self.points.append((x, y))
         point = self.create_oval(x-1, y-1, x+1, y+1, width=1, fill="black")
-        self.pattern_graphics.append(point)
+        self.pattern_graphics.append(point) 
 
     def enter(self, event):
         print("Starting bots!")
@@ -103,17 +103,17 @@ class Driver(tk.Canvas):
             # Add two to account for the border.
             if (int(x_box + 2), int(y_box + 2)) not in self.target_cells:
                 self.target_cells.append((int(x_box + 2), int(y_box + 2)))
-            self.cell_graphics.append(
-                self.create_rectangle(
-                    x_center - 0.5 * box_width,
-                    y_center - 0.5 * box_height,
-                    x_center + 0.5 * box_width,
-                    y_center + 0.5 * box_height,
-                    fill="#AAAAAA"))
+                self.cell_graphics.append(
+                    self.create_rectangle(
+                        x_center - 0.5 * box_width,
+                        y_center - 0.5 * box_height,
+                        x_center + 0.5 * box_width,
+                        y_center + 0.5 * box_height,
+                        fill="#AAAAAA"))
 
     def build_drones(self):
         print("Building drones.")
-        for i in range(self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)):
+        for i in range(self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)-1):
             self.make_drone()
 
     def make_drone(self, x=None, y=None):
@@ -125,7 +125,7 @@ class Driver(tk.Canvas):
                 Drone(
                     self.drones_made,
                     self.target_cells,
-                    self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)),
+                    self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)-1),
                 x if x else random.randint(0, self.X_DIM-1),
                 y if y else random.randint(0, self.Y_DIM-1))
             if x and y:

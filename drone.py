@@ -91,6 +91,7 @@ class Drone():
         blocker = self.drone_at(best_dir, map)
         if blocker:
             self.message_target(blocker, target, msg_callback)
+            moves = [(0, 0)]
 
         while moves:
             dir = moves.pop(0)
@@ -111,6 +112,9 @@ class Drone():
         if DEBUG: print("Assigning target {} to drone {}".format(target, blocker))
         messager = msg_callback(blocker)
         messager("TGT" + str(target))
+        # If we were given the target, we can pick our own again now.
+        if self.assigned_target:
+            self.assigned_target = None
 
     def drone_at(self, move, map):
         move_space = (self.x + move[0], self.y + move[1])
@@ -143,8 +147,10 @@ class Drone():
         # If we're blocking another drone, move out of the way.
         if self.assigned_target:
             if DEBUG: print("Assigned target: {}".format(self.assigned_target))
-            tgt = self.assigned_target
-            self.assigned_target = None
+            tgt = self.assigned_target[0]
+            self.assigned_target[1] -= 1
+            if self.assigned_target[1] == 0:
+                self.assigned_target = None
             return tgt
 
         if DEBUG: print("Looking for target in {}".format(self.relative_targets))
@@ -210,7 +216,8 @@ class Drone():
             # if DEBUG: print("Updated map: {}".format(self.map))
             # if DEBUG: self.print_map()
         elif msg[:3] == "TGT":
-            self.assigned_target = ast.literal_eval(msg[3:])
+            # Attempt to move towards target for 2 turns, due to ordering.
+            self.assigned_target = [ast.literal_eval(msg[3:]), 2]
 
     # Requires a sensor map, not the memory map.
     # TODO: Fix this so that it works with memory map instead.
