@@ -6,7 +6,7 @@ DEBUG = False
 
 class Drone():
 
-    TIME_BETWEEN_SYNCS = 10
+    TIME_BETWEEN_SYNCS = 25
     CONSENSUS_NEEDED = 0.25
 
     def __init__(self, num, target_pattern, num_drones):

@@ -11,7 +11,18 @@ attempt to create the pattern. Drones can crash into each other, if they don't
 communicate properly to one another where they are going, as their moves are
 simultaneous (mostly), but they have a deference method in place to handle that.
 
-Each drone knows the full pattern they're trying to create, but will up- or
+They have some amount of cooperation in getting the pattern created, and can
+tell other drones if they are in the way. They don't use any fancy pathfinding
+or anything though, and can easily get stuck behind walls of obstacles. Adding
+Dijkstra's would not be difficult, but since I've done that one plenty of times,
+I decided not to bother. Provided obstacles are scarce, the drones do fine.
+
+There's a method you can turn on called DYNAMIC_MODE that will cause drones
+to be deleted and created constantly, in order to highlight their communication
+abilities and how they don't have to explore the full map, and can hand down
+information over time without needing a centralized leader.
+
+Each drone does know the full pattern they're trying to create, but will up- or
 down- scale it to match the current size of the environment it is aware of.
 Obstacles are supported, so it should be possible to partition the drones off
 and see them create multiple copies of the design. (Provided the quorum is set

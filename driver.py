@@ -4,18 +4,31 @@ import sys
 
 from drone import Drone
 
+# Turn on for extra information. (See corresponding setting in drone.py as well.)
 DEBUG = False
+
+# Turn off to stop showing the IDs on each drone. (Useful for very large boards.)
 SHOW_IDS = True
-DYNAMIC_MODE = False
+
+# Turn on to destroy DYN_NUM drones every DYN_TIME cycles. The drones will be
+# replaced one per cycle starting a cycle after they are destroyed.
+# If ONE_SPAWN is True, all new drones start at (1, 1). Otherwise they start at
+# random locations on the board.
+DYNAMIC_MODE = True
+DYN_TIME = 10
+DYN_NUM = 5
+ONE_SPAWN = False
+
+# When set to True, will override NUM_DRONES and create exactly as many drones
+# as there are target squares on the board. (Mostly...)
 EXACT_COVERAGE = True
-DYN_TIME = 1
 
 class Driver(tk.Canvas):
 
-    NUM_DRONES = 50
-    TURN_TIME = 250
-    X_DIM = 10
-    Y_DIM = 10
+    NUM_DRONES = 100
+    TURN_TIME = 100
+    X_DIM = 25
+    Y_DIM = 25
 
     HEIGHT = 600
     WIDTH = 600
@@ -127,10 +140,14 @@ class Driver(tk.Canvas):
                         x_center + 0.5 * box_width,
                         y_center + 0.5 * box_height,
                         fill="#AAAAAA"))
+        if EXACT_COVERAGE:
+            # Reassign the "constant" if we're in EXACT_COVERAGE mode.
+            # Dirty pool, I know, but other than this it's read-only.
+            self.NUM_DRONES = len(self.target_cells) - 1
 
     def build_drones(self):
         print("Building drones.")
-        for i in range(self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)-1):
+        for i in range(self.NUM_DRONES):
             self.make_drone()
 
     def make_drone(self, x=None, y=None):
@@ -142,7 +159,7 @@ class Driver(tk.Canvas):
                 Drone(
                     self.drones_made,
                     self.target_cells,
-                    self.NUM_DRONES if not EXACT_COVERAGE else len(self.target_cells)-1),
+                    self.NUM_DRONES),
                 x if x else random.randint(0, self.X_DIM-1),
                 y if y else random.randint(0, self.Y_DIM-1))
             if x and y:
@@ -167,11 +184,11 @@ class Driver(tk.Canvas):
         for drone in self.drones:
             self.draw_drone_graphic(drone)
 
-    def draw_drone_graphic(self, drone):
+    def draw_drone_graphic(self, drone, new=False):
         drone_draw_pos = self.get_drone_draw_pos(drone)
         d_rect = self.create_rectangle(
             *drone_draw_pos[0],
-            fill = 'red')
+            fill = 'red' if not new else 'magenta')
         d_text = self.create_text(
             *drone_draw_pos[1],
             text=str(drone.drone.num),
@@ -189,18 +206,14 @@ class Driver(tk.Canvas):
             print("Board size: {}".format(sys.getsizeof(self.board)))
 
         new_board = self.board.copy()
-        # Clear all drones from board, to avoid
+        # Clear all drones from board, to avoid problems.
         for k in list(new_board):
             if new_board[k] != "X":
                 del new_board[k]
 
 
         if DYNAMIC_MODE:
-            if self.time % DYN_TIME == 0:
-                drone = random.choice(self.drones)
-                self.destroy_drone(drone)
-                drone = self.make_drone(1, 1)
-                self.draw_drone_graphic(drone)
+            self.make_and_destroy()
 
         # Use list() to allow modification during iteration, in case of crash.
         for drone in list(self.drones):
@@ -216,13 +229,28 @@ class Driver(tk.Canvas):
                 # Note later drones can overwrite earlier ones here. This is
                 # semi-intentional, and the collision method ensures that all
                 # drones except the one with current claim to the tile will
-                # crash, which seems reasonable.
+                # crash, which seems reasonable. Just imagine they have
+                # battering rams on the front, so whoever gets there second
+                # crushes the first guy.
                 new_board[(drone.x, drone.y)] = str(drone.drone.num)
         self.board = new_board
         for drone in list(self.drones):
             if self.drone_collision(drone):
                 self.destroy_drone(drone)
         self.draw()
+
+    def make_and_destroy(self):
+        if len(self.drones) < self.NUM_DRONES:
+            if ONE_SPAWN:
+                drone = self.make_drone(1, 1)
+            else:
+                drone = self.make_drone()
+
+            self.draw_drone_graphic(drone, new=True)
+        if self.time % DYN_TIME == 0 and self.drones:
+            for i in range(min(DYN_NUM, len(self.drones))):
+                drone = random.choice(self.drones)
+                self.destroy_drone(drone)
 
     def send_message(self, to):
         return self.get_drone(to).msg
@@ -256,6 +284,9 @@ class Driver(tk.Canvas):
         for drone in self.graphics:
             drone_draw_pos = self.get_drone_draw_pos(drone)
             self.coords(self.graphics[drone][0], *drone_draw_pos[0])
+            # Turn red after being magneta for their first cycle on the board.
+            if drone.drone.t == 2:
+                self.itemconfig(self.graphics[drone][0], fill="red")
             self.coords(self.graphics[drone][1], *drone_draw_pos[1])
         self.after(self.TURN_TIME, self.update)
 
@@ -318,7 +349,7 @@ class Driver(tk.Canvas):
         return False
 
     def destroy_drone(self, drone):
-        print("Destroying drone {}!".format(drone.drone.num))
+        if DEBUG: print("Destroying drone {}!".format(drone.drone.num))
         for i in self.graphics[drone]:
             self.delete(i)
         del self.graphics[drone]
