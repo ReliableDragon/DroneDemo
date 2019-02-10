@@ -54,7 +54,23 @@ class Driver(tk.Canvas):
         y = event.y
         self.points.append((x, y))
         point = self.create_oval(x-1, y-1, x+1, y+1, width=1, fill="black")
-        self.pattern_graphics.append(point) 
+        self.pattern_graphics.append(point)
+
+    def debug_click(self, event):
+        x = event.x
+        y = event.y
+        print("Click at ({}, {})".format(x, y))
+        cell = (int(self.X_DIM * x / self.WIDTH),
+                int(self.Y_DIM * y / self.HEIGHT))
+        if cell not in self.board:
+            print("At {} there is nothing!".format(cell))
+            return
+        at_loc = self.board[cell]
+        if at_loc == "X":
+            print("At {} is: {}".format(cell, at_loc))
+        else:
+            drone = list(filter(lambda d: str(d.drone.num) == str(at_loc), self.drones))[0]
+            drone.drone.debug_dump()
 
     def enter(self, event):
         print("Starting bots!")
@@ -62,6 +78,7 @@ class Driver(tk.Canvas):
             self.delete(i)
         self.unbind("<B1-Motion>")
         self.unbind("<Key>")
+        self.bind("<Button-1>", self.debug_click)
         self.start()
 
     def start(self):

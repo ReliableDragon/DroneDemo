@@ -36,6 +36,14 @@ class Drone():
         self.last_seen = {}
         self.assigned_target = None
 
+    def debug_dump(self):
+        print("Drone #{} at ({}, {}).".format(self.num, self.x, self.y))
+        print("Map in coordinate system {}:".format(self.coords))
+        self.print_map()
+        print("Last seen: {}".format(str(self.last_seen)))
+        print("Last syncs: {}".format(str(self.syncs)))
+        print("Target pattern: {}".format(str(self.relative_targets)))
+
     def update(self, unprocessed_map, msg_callback):
         if DEBUG: print("Drone {} running at location {}!".format(self.num, (self.x, self.y)))
         # if DEBUG: print("Choreographs: {}".format(self.choreographed_moves))
