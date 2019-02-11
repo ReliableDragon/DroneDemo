@@ -44,7 +44,8 @@ class Drone():
         print("Target pattern: {}".format(str(self.relative_targets)))
 
     def update(self, unprocessed_map, msg_callback):
-        if DEBUG: print("Drone {} running at location {}!".format(self.num, (self.x, self.y)))
+        if DEBUG: print("Drone {} running at location {} with coordinate system {}."
+            .format(self.num, (self.x, self.y), self.coords))
         # if DEBUG: print("Choreographs: {}".format(self.choreographed_moves))
         if DEBUG: print("Raw map: {}".format(unprocessed_map))
         self.t += 1
@@ -93,12 +94,12 @@ class Drone():
             # moves = self.move_random(map)
             moves = self.move_to_target(target, map)
 
-        # If we're blocked by another drone, give them our target.
-        best_dir = moves[0]
-        blocker = self.drone_at(best_dir, map)
-        if blocker:
-            self.message_target(blocker, target, msg_callback)
-            moves = [(0, 0)]
+            # If we're blocked by another drone, give them our target.
+            best_dir = moves[0]
+            blocker = self.drone_at(best_dir, map)
+            if blocker:
+                self.message_target(blocker, target, msg_callback)
+                moves = [(0, 0)]
 
         while moves:
             dir = moves.pop(0)
@@ -211,17 +212,18 @@ class Drone():
             us_start = msg.find('U')
             map_start = msg.find('D')
             num = msg[:coord_start]
-            # if DEBUG: print("Num: {}".format(num))
+            if DEBUG: print("Num: {}".format(num))
             coords = msg[coord_start+1:them_start]
             # if DEBUG: print("Coords: {}".format(coords))
             them_loc = tuple(json.loads(msg[them_start+1:us_start]))
-            # if DEBUG: print("Their loc: {}".format(them_loc))
+            if DEBUG: print("Their loc: {}".format(them_loc))
             us_loc = tuple(json.loads(msg[us_start+1:map_start]))
-            # if DEBUG: print("Us loc: {}".format(us_loc))
+            if DEBUG: print("Us loc: {}".format(us_loc))
             unprocessed_map = self.pythonify_dict(msg[map_start+1:])
+            if DEBUG: print("Map got: {}".format(unprocessed_map))
             self.combine_maps(unprocessed_map, num, coords, them_loc, us_loc)
-            # if DEBUG: print("Updated map: {}".format(self.map))
-            # if DEBUG: self.print_map()
+            if DEBUG: print("Updated map: {}".format(self.map))
+            if DEBUG: self.print_map()
         elif msg[:3] == "TGT":
             # Attempt to move towards target for 2 turns, due to ordering.
             self.assigned_target = [tuple(json.loads(msg[3:])), 2]
@@ -323,6 +325,7 @@ class Drone():
         map[their_pos] = (str(num), map[their_pos][1])
         # Update our position to have 'M' instead of our ID.
         map[my_pos] = ('M', map[my_pos][1])
+        if DEBUG: print("Map after swaps: {}".format(map))
 
         offset_x = self.x - my_pos[0]
         offset_y = self.y - my_pos[1]

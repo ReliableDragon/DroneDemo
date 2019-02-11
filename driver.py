@@ -2,11 +2,14 @@ import tkinter as tk
 import random
 import sys
 import time
+import cProfile
+
+from collections import OrderedDict
 
 from drone import Drone
 
 # Turn on for extra information. (See corresponding setting in drone.py as well.)
-DEBUG = True
+DEBUG = False
 
 # Turn off to stop showing the IDs on each drone. (Useful for very large boards.)
 SHOW_IDS = True
@@ -26,17 +29,17 @@ EXACT_COVERAGE = True
 
 class Driver(tk.Canvas):
 
-    NUM_DRONES = 50
+    NUM_DRONES = 2
     TURN_TIME = 100
-    X_DIM = 25
-    Y_DIM = 25
+    X_DIM = 10
+    Y_DIM = 10
 
     HEIGHT = 600
     WIDTH = 600
 
     graphics = {}
     obstacle_graphics = {}
-    drones = []
+    drones = OrderedDict()
     board = {(5, 0): "X", (0, 5): "X", (5, 5): "X"}
 
     pattern_graphics = []
@@ -84,7 +87,7 @@ class Driver(tk.Canvas):
         if at_loc == "X":
             print("At {} is: {}".format(cell, at_loc))
         else:
-            drone = list(filter(lambda d: str(d.drone.num) == str(at_loc), self.drones))[0]
+            drone = self.drones[str(at_loc)]
             drone.drone.debug_dump()
 
     def enter(self, event):
@@ -173,7 +176,7 @@ class Driver(tk.Canvas):
             print("Unable to create drone {}!".format(self.drones_made))
 
         self.board[(drone.x, drone.y)] = str(drone.drone.num)
-        self.drones.append(drone)
+        self.drones[str(self.drones_made)] = drone
         self.drones_made += 1
         return drone
 
@@ -185,7 +188,7 @@ class Driver(tk.Canvas):
                 self.obstacle_graphics[obstacle] = self.create_oval(
                     *self.get_rect_and_mid(*obstacle)[0], fill="#4444ff")
 
-        for drone in self.drones:
+        for drone in self.drones.values():
             self.draw_drone_graphic(drone)
 
     def draw_drone_graphic(self, drone, new=False):
@@ -201,16 +204,18 @@ class Driver(tk.Canvas):
 
     def update(self):
         # Time the method, so we can subtract our time processing from how long
-        # each step should take. It helps a little.
-        start = time.time()
-        self.time += 1
-
+        # each step should take. It helps a little. Also profile it.
         if DEBUG:
+            start = time.time()
+            pr = cProfile.Profile()
+            pr.enable()
+
             print("Drones size: {}".format(sys.getsizeof(self.drones)))
-            print("Drone sum size: {}".format(sum([sys.getsizeof(d) for d in self.drones])))
             print("Graphics size: {}".format(sys.getsizeof(self.graphics)))
             print("Obstacle Graphics size: {}".format(sys.getsizeof(self.obstacle_graphics)))
             print("Board size: {}".format(sys.getsizeof(self.board)))
+
+        self.time += 1
 
         new_board = self.board.copy()
         # Clear all drones from board, to avoid problems.
@@ -223,7 +228,8 @@ class Driver(tk.Canvas):
             self.make_and_destroy()
 
         # Use list() to allow modification during iteration, in case of crash.
-        for drone in list(self.drones):
+        for drone_num in list(self.drones.keys()):
+            drone = self.drones[drone_num]
             _map = self.make_map(drone)
 
             move = drone.drone.update(_map, self.send_message)
@@ -241,12 +247,15 @@ class Driver(tk.Canvas):
                 # crushes the first guy.
                 new_board[(drone.x, drone.y)] = str(drone.drone.num)
         self.board = new_board
-        for drone in list(self.drones):
+        for drone in list(self.drones.values()):
             if self.drone_collision(drone):
                 self.destroy_drone(drone)
-        stop = time.time()
-        self.processing_time = stop - start
-        if DEBUG: print("Processing drones took {}s.".format(stop - start))
+        if DEBUG:
+            stop = time.time()
+            self.processing_time = stop - start
+            print("Processing drones took {}s.".format(stop - start))
+            pr.disable()
+            pr.print_stats(sort='time')
         self.draw()
 
     def make_and_destroy(self):
@@ -259,7 +268,7 @@ class Driver(tk.Canvas):
             self.draw_drone_graphic(drone, new=True)
         if self.time % DYN_TIME == 0 and self.drones:
             for i in range(min(DYN_NUM, len(self.drones))):
-                drone = random.choice(self.drones)
+                drone = random.choice(self.drones.values())
                 self.destroy_drone(drone)
 
     def send_message(self, to):
@@ -282,12 +291,11 @@ class Driver(tk.Canvas):
         return map
 
     def get_drone(self, n):
-        drone = list(filter(lambda d: d.num == int(n), [d.drone for d in self.drones]))
-        if not drone:
-            self.debug_dump(drone = drone)
+        if not n in self.drones:
+            self.debug_dump()
             raise RuntimeError("Could not find drone #{}".format(n))
         else:
-            return drone[0]
+            return self.drones[n].drone
 
     def draw(self):
         for drone in self.graphics:
@@ -341,7 +349,7 @@ class Driver(tk.Canvas):
 
     def drone_collision(self, drone):
         # Check for collisions
-        for d in self.drones:
+        for d in self.drones.values():
             if ((drone.x, drone.y) == (d.x, d.y)
                 and drone.drone.num != d.drone.num):
                 # All drones except the last one to move into a tile crash.
@@ -362,7 +370,7 @@ class Driver(tk.Canvas):
         for i in self.graphics[drone]:
             self.delete(i)
         del self.graphics[drone]
-        self.drones.remove(drone)
+        del self.drones[str(drone.drone.num)]
         drone_loc = (drone.x, drone.y)
         if (drone_loc in self.board
           and self.board[drone_loc] == str(drone.drone.num)):
@@ -370,7 +378,7 @@ class Driver(tk.Canvas):
 
     def debug_dump(self, **kwargs):
         print("Board: {}\n".format(self.board))
-        print("Drones: {}\n".format([str(d) for d in self.drones]))
+        print("Drones: {}\n".format(self.drones))
         print("Drone Graphics: {}\n".format(
             ["{}: {}".format(str(d), v) for d, v in self.graphics.items()]))
         print("Obstacle Graphics: {}\n".format(self.obstacle_graphics))
@@ -385,3 +393,6 @@ class AbsDrone():
 
     def __str__(self):
         return "#{}: ({}, {})".format(self.drone.num, self.x, self.y)
+
+    def __repr__(self):
+        return self.__str__()
